@@ -6,6 +6,8 @@
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
 
+#define TIMER 1
+
 static std::string startTimeString;
 
 // For camera controls
@@ -41,6 +43,16 @@ int iteration;
 
 int width;
 int height;
+
+
+#if TIMER
+#include <chrono>
+using time_point_t = std::chrono::high_resolution_clock::time_point;
+time_point_t time_start;
+time_point_t time_end;
+bool isIterationEnd = false;
+
+#endif
 
 //-------------------------------
 //-------------MAIN--------------
@@ -149,6 +161,9 @@ void runCuda() {
 	if (iteration == 0) {
 		pathtraceFree();
 		pathtraceInit(scene);
+#if TIMER
+	time_start = std::chrono::high_resolution_clock::now();
+#endif
 	}
 
 	uchar4* pbo_dptr = NULL;
@@ -165,13 +180,39 @@ void runCuda() {
 	if (ui_showGbuffer) {
 		showGBuffer(pbo_dptr);
 	}
-	else if (ui_denoise) {
+	else if (ui_denoise /*&& iteration == ui_iterations*/) {
+#if TIMER
+		time_point_t denoise_time_start = std::chrono::high_resolution_clock::now();
+#endif
 		denoiseImage(
 			ui_filterSize, ui_colorWeight, ui_normalWeight, ui_positionWeight,
 			pbo_dptr, iteration);
+#if TIMER
+	/*	time_point_t denoise_time_end = std::chrono::high_resolution_clock::now();
+		std::cout << "Denoiser take about: "
+			<< (denoise_time_end - denoise_time_start) / 1ms
+			<< "ms" << std::endl;*/
+		if (!isIterationEnd) {
+			isIterationEnd = true;
+			time_end = std::chrono::high_resolution_clock::now();
+			std::cout << "Path tracer with denioser take about: "
+				<< (time_end - time_start) / 1ms
+				<< "ms" << std::endl;
+		}
+#endif
 	}
-	else {
+	else if(!ui_denoise /*&& iteration == ui_iterations*/) {
+
 		showImage(pbo_dptr, iteration);
+#if TIMER
+		if (!isIterationEnd) {
+			isIterationEnd = true;
+			time_end = std::chrono::high_resolution_clock::now();
+			std::cout << "Path tracer without denoiser take about: "
+				<< (time_end - time_start) / 1ms
+				<< "ms" << std::endl;
+		}
+#endif
 	}
 
 	// unmap buffer object

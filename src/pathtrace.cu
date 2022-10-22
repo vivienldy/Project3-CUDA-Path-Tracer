@@ -17,11 +17,11 @@
 
 #define ERRORCHECK 1
 
-#define SHOW_POS_GBUFFER 0
-#define SHOW_NOR_GBUFFER 1
+#define SHOW_POS_GBUFFER 1
+#define SHOW_NOR_GBUFFER 0
 
 #define SORT_BY_MATERIAL 1
-#define CACHE_FIRST_INTERSECTION 0
+#define CACHE_FIRST_INTERSECTION 1
 
 #define ANTIALIASING 0
 
@@ -722,7 +722,7 @@ void showImage(uchar4* pbo, int iter) {
 	sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image);
 }
 
-__global__ void aTrousDenoise(Camera cam, int stepSize, float* kernel, glm::vec3* denoised1, glm::vec3* denoised2)
+__global__ void gaussianDenoise(Camera cam, int stepSize, float* kernel, glm::vec3* denoised1, glm::vec3* denoised2)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -744,6 +744,50 @@ __global__ void aTrousDenoise(Camera cam, int stepSize, float* kernel, glm::vec3
 					// get the pixel color
 					glm::vec3 col = denoised1[newIdx];
 					finalColor += col * kernelWeight;
+				}
+			}
+		}
+		denoised2[idx] = finalColor;
+	}
+}
+
+__global__ void aTrousDenoise(
+	Camera cam, int stepSize, float* kernel,
+	glm::vec3* denoised1, glm::vec3* denoised2, int iter)
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	int idx = x + cam.resolution.x * y;
+
+	if (x < cam.resolution.x && y < cam.resolution.y) {
+		// get the origin pixel color, position color, normal color -> denote as q in the paper
+		glm::vec3 colQ = denoised1[idx];
+		if (stepSize == 1) {
+			colQ = colQ / (float)iter;
+		}
+
+		glm::vec3 finalColor = glm::vec3(0.f);
+		float k = 0.f;
+
+		// do the  5 * 5 kernel
+		for (int i = -2; i <= 2; i++) {
+			for (int j = -2; j <= 2; j++) {
+				int newX = x + i * stepSize;
+				int newY = y + j * stepSize;
+				int newIdx = newX + cam.resolution.x * newY;
+
+				if (newIdx < cam.resolution.x * cam.resolution.y && newIdx >= 0) {
+					// get the kernel value
+					int hIdx = (i + 2) + (j + 2) * 5;
+					float h = kernel[hIdx];
+					// get the current pixel color, position color, normal color -> denote as p in the paper
+					glm::vec3 colP = denoised1[newIdx];
+					if (stepSize == 1) {
+						colP = denoised1[newIdx] / (float)iter;
+					}
+
+					finalColor += h * colP;
 				}
 			}
 		}
@@ -1018,18 +1062,20 @@ void denoiseImage(
 	cudaMemcpy(dev_denoise1, dev_image, pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
 
 	// do filter iteration
-	int iterTimes = floor(log2(filterSize / 5.f));
-	// int iterTimes = (int)glm::round(glm::log2(filterSize));
+	int iterTimes = filterSize < 5 ?0 : floor(log2(filterSize / 5.f));
 	for (int i = 0; i < iterTimes; ++i) {
 		int stepSize = pow(2, i);
-		//int stepSize = i;
-	   //aTrousDenoise << <blocksPerGrid2d, blockSize2d >> > (cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2);
-	   // checkCUDAError("a trous denoise");
+	   //gaussianDenoise << <blocksPerGrid2d, blockSize2d >> > (cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2);
+	   // checkCUDAError("gaussian denoise");
 
-		aTrousDenoiseWithEdgeStopping << <blocksPerGrid2d, blockSize2d >> > (
-			cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2,
-			colPhi, norPhi, posPhi, dev_gBuffer, iter);
-		checkCUDAError("a trous denoise with edge stopping");
+		aTrousDenoise << <blocksPerGrid2d, blockSize2d >> > (
+			cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2, iter);
+		checkCUDAError("a trous denoise");
+
+		//aTrousDenoiseWithEdgeStopping << <blocksPerGrid2d, blockSize2d >> > (
+		//	cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2,
+		//	colPhi, norPhi, posPhi, dev_gBuffer, iter);
+		//checkCUDAError("a trous denoise with edge stopping");
 
 		glm::vec3* tmp = dev_denoise1;
 		dev_denoise1 = dev_denoise2;
@@ -1038,6 +1084,10 @@ void denoiseImage(
 
 	// show denoiseImage
 	 // Send results to OpenGL buffer for rendering
-	//sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoise1);
-	sendDenoisedImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, dev_denoise1);
+	if (iterTimes == 0) {
+		sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoise1);
+	 }
+	else {
+		sendDenoisedImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, dev_denoise1);
+	}
 }
