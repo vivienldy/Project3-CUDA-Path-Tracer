@@ -1068,14 +1068,14 @@ void denoiseImage(
 	   //gaussianDenoise << <blocksPerGrid2d, blockSize2d >> > (cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2);
 	   // checkCUDAError("gaussian denoise");
 
-		aTrousDenoise << <blocksPerGrid2d, blockSize2d >> > (
-			cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2, iter);
-		checkCUDAError("a trous denoise");
+		//aTrousDenoise << <blocksPerGrid2d, blockSize2d >> > (
+		//	cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2, iter);
+		//checkCUDAError("a trous denoise");
 
-		//aTrousDenoiseWithEdgeStopping << <blocksPerGrid2d, blockSize2d >> > (
-		//	cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2,
-		//	colPhi, norPhi, posPhi, dev_gBuffer, iter);
-		//checkCUDAError("a trous denoise with edge stopping");
+		aTrousDenoiseWithEdgeStopping << <blocksPerGrid2d, blockSize2d >> > (
+			cam, stepSize, dev_kernel, dev_denoise1, dev_denoise2,
+			colPhi, norPhi, posPhi, dev_gBuffer, iter);
+		checkCUDAError("a trous denoise with edge stopping");
 
 		glm::vec3* tmp = dev_denoise1;
 		dev_denoise1 = dev_denoise2;
